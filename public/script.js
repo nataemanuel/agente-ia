@@ -30,30 +30,3 @@ async function sendMessage() {
   `;
 
 }
-/* Botão de Nova Conversa estilo ChatGPT */
-.btn-new-chat {
-    background-color: #a8c7fa;
-    color: #043055;
-    border: none;
-    padding: 12px;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    text-align: center;
-    width: 100%;
-}
-
-.btn-new-chat:hover {
-    background-color: #c2e7ff;
-}
-
-/* Modificações na estrutura do header da sidebar */
-.sidebar-header-container {
-    padding: 15px;
-    border-bottom: 1px solid #303134;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}

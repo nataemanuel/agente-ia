@@ -1,193 +1,543 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Chat IA</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-    <div class="chat-container">
-        <div class="sidebar" id="sidebar">
-            <div class="sidebar-header-container">
-                <button class="btn-new-chat" onclick="startNewChat()">+ Nova Conversa</button>
-                <button class="btn-delete-history" onclick="clearCurrentHistory()">Apagar Conversa Atual</button>
-            </div>
-            <div class="sidebar-content" id="historyContent"></div>
+<div class="chat-container">
+
+    <div class="modal-overlay" id="modalOverlay" onclick="toggleSidebar()"></div>
+
+    <div class="sidebar" id="sidebarMenu">
+        <div class="sidebar-header-container">
+            <button class="btn-new-chat" onclick="startNewChat()">+ Nova Conversa</button>
+            <button class="btn-delete-history" onclick="clearCurrentHistory()">Apagar Conversa Atual</button>
         </div>
-
-        <div class="main-chat">
-            <div class="chat-header">
-                <h3>Gemini Assistant</h3>
-                <span id="chat-status" style="font-size: 0.85rem; color: #a8c7fa;">Nova sessão</span>
-            </div>
-            
-            <div class="chat-messages" id="chatbox">
-                </div>
-
-            <div class="typing-indicator" id="typingBubble">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-
-            <div class="chat-input-area">
-                <input type="text" id="userInput" placeholder="Digite sua mensagem aqui..." onkeydown="if(event.key === 'Enter') sendMessage()">
-                <button onclick="sendMessage()">Enviar</button>
-            </div>
-        </div>
+        <div class="sidebar-content" id="historyContent"></div>
     </div>
 
-    <script>
-        let currentSessionId = "";
+    <div class="main-chat">
+        <div class="chat-header">
+            <button class="btn-menu-mobile" onclick="toggleSidebar()">☰</button>
+            
+            <h3>NathanBot</h3>
+            <span id="chat-status">Nova sessão</span>
+        </div>
 
-        window.onload = function() {
-            startNewChat();
+
+       <div class="typing-indicator" id="typingBubble" style="display:none;">
+
+    <span></span>
+    <span></span>
+    <span></span>
+
+</div>
+
+
+<div class="chat-messages" id="chatbox"></div>
+
+
+        <div class="chat-input-area">
+
+            <input 
+            type="text" 
+            id="userInput"
+            placeholder="Digite sua mensagem aqui..."
+            onkeydown="if(event.key === 'Enter') sendMessage()">
+
+
+            <button onclick="sendMessage()">
+                Enviar
+            </button>
+
+        </div>
+
+
+    </div>
+
+
+</div>
+
+
+<script>
+
+let currentSessionId = "";
+
+
+// inicia página
+window.onload = function(){
+
+    startNewChat();
+
+    loadAllChats();
+
+};
+
+
+
+// ==========================
+// NOVA CONVERSA
+// ==========================
+
+function startNewChat(){
+
+    currentSessionId = "chat-" + Date.now();
+
+
+    const chatbox = document.getElementById("chatbox");
+
+    chatbox.innerHTML = "";
+
+
+    const welcome = document.createElement("p");
+
+    welcome.id = "welcome-msg";
+
+    welcome.style.textAlign = "center";
+    welcome.style.color = "#80868b";
+    welcome.style.fontSize = "0.9rem";
+    welcome.style.marginTop = "20px";
+
+    welcome.textContent =
+    "Comece uma nova conversa!";
+
+
+    chatbox.appendChild(welcome);
+
+
+    document.getElementById("chat-status").innerText =
+    "Conversa Ativa";
+
+
+    hideTyping();
+
+}
+
+
+
+// ==========================
+// ANIMAÇÃO DIGITANDO
+// ==========================
+
+function showTyping(){
+
+    const bubble =
+    document.getElementById("typingBubble");
+
+
+    if(bubble){
+
+        bubble.style.display = "flex";
+
+    }
+
+}
+
+
+
+function hideTyping(){
+
+    const bubble =
+    document.getElementById("typingBubble");
+
+
+    if(bubble){
+
+        bubble.style.display = "none";
+
+    }
+
+}
+
+
+
+// ==========================
+// ENVIAR MENSAGEM
+// ==========================
+
+async function sendMessage(){
+
+
+    const input =
+    document.getElementById("userInput");
+
+
+    const chatbox =
+    document.getElementById("chatbox");
+
+
+    const message =
+    input.value.trim();
+
+
+
+    if(!message) return;
+
+
+
+    const welcome =
+    document.getElementById("welcome-msg");
+
+
+    if(welcome){
+
+        welcome.remove();
+
+    }
+
+
+
+    // mensagem usuário
+
+    const userDiv =
+    document.createElement("div");
+
+
+    userDiv.className =
+    "message user";
+
+
+    userDiv.innerHTML =
+    `<b>Você:</b><br>${message}`;
+
+
+    chatbox.appendChild(userDiv);
+
+
+
+    input.value = "";
+
+
+
+    showTyping();
+
+
+
+    try{
+
+
+        const response =
+        await fetch("/chat",{
+
+            method:"POST",
+
+            headers:{
+                "Content-Type":"application/json"
+            },
+
+
+            body:JSON.stringify({
+
+                message,
+
+                sessionId:currentSessionId
+
+            })
+
+
+        });
+
+
+
+        const data =
+        await response.json();
+
+
+
+        hideTyping();
+
+
+
+        if(data.reply){
+
+
+
+            const botDiv =
+            document.createElement("div");
+
+
+            botDiv.className =
+            "message bot";
+
+
+            botDiv.innerHTML =
+            `<b>Gemini:</b><br>${data.reply}`;
+
+
+            chatbox.appendChild(botDiv);
+
+
+
             loadAllChats();
-        };
 
-        function startNewChat() {
-            currentSessionId = "chat-" + Date.now();
-            document.getElementById("chatbox").innerHTML = `
-                <p id="welcome-msg" style="text-align: center; color: #80868b; font-size: 0.9rem; margin-top: 20px;">
-                    Comece uma nova conversa!
-                </p>
-            `;
-            document.getElementById("chat-status").innerText = "Conversa Ativa";
-            hideTyping();
+
+
+        }else{
+
+
+            showError(data.error);
+
+
         }
 
-        // Funções auxiliares para mostrar/esconder a animação
-        function showTyping() {
-            const bubble = document.getElementById("typingBubble");
-            const chatbox = document.getElementById("chatbox");
-            bubble.style.display = "flex";
-            // Coloca o indicador visual no final da lista de mensagens
-            chatbox.appendChild(bubble); 
-            chatbox.scrollTop = chatbox.scrollHeight;
+
+
+    }catch(error){
+
+
+        hideTyping();
+
+
+        showError(
+        "Conexão falhou."
+        );
+
+
+    }
+
+
+
+    chatbox.scrollTop =
+    chatbox.scrollHeight;
+
+
+}
+
+
+
+// mensagem de erro
+
+function showError(text){
+
+
+    const chatbox =
+    document.getElementById("chatbox");
+
+
+    const error =
+    document.createElement("div");
+
+
+    error.className =
+    "message error";
+
+
+    error.innerHTML =
+    `<b>Erro:</b> ${text}`;
+
+
+    chatbox.appendChild(error);
+
+
+}
+
+
+
+// ==========================
+// LISTAR CONVERSAS
+// ==========================
+
+async function loadAllChats(){
+
+
+    const historyContent =
+    document.getElementById("historyContent");
+
+
+    try{
+
+
+        const response =
+        await fetch("/historico/lista/sessoes");
+
+
+        const sessoes =
+        await response.json();
+
+
+
+        historyContent.innerHTML="";
+
+
+
+        if(sessoes.length===0){
+
+
+            historyContent.innerHTML =
+            "<p>Nenhum chat salvo.</p>";
+
+
+            return;
+
         }
 
-        function hideTyping() {
-            document.getElementById("typingBubble").style.display = "none";
-        }
 
-        async function sendMessage() {
-            const input = document.getElementById("userInput");
-            const chatbox = document.getElementById("chatbox");
-            const message = input.value.trim();
-            
-            if (!message) return;
 
-            // Remove mensagem de boas-vindas se existir
-            const welcome = document.getElementById("welcome-msg");
-            if (welcome) welcome.remove();
+        sessoes.forEach(sessao=>{
 
-            // Adiciona mensagem do usuário
-            chatbox.innerHTML += `
-                <div class="message user">
-                    <b>Você:</b><br>${message}
-                </div>
-            `;
-            input.value = "";
-            
-            // ATIVA A ANIMAÇÃO enquanto espera a API
-            showTyping();
 
-            try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message, sessionId: currentSessionId })
-                });
+            const item =
+            document.createElement("div");
 
-                const data = await response.json();
-                
-                // DESATIVA A ANIMAÇÃO porque a resposta chegou
-                hideTyping();
 
-                if (data.reply) {
-                    chatbox.innerHTML += `
-                        <div class="message bot">
-                            <b>Gemini:</b><br>${data.reply}
-                        </div>
-                    `;
-                    loadAllChats();
-                } else {
-                    chatbox.innerHTML += `<div class="message error"><b>Erro:</b> ${data.error}</div>`;
-                }
-            } catch (error) {
-                hideTyping(); // Desativa mesmo se der erro
-                chatbox.innerHTML += `<div class="message error"><b>Erro:</b> Conexão falhou.</div>`;
-            }
-            
-            chatbox.scrollTop = chatbox.scrollHeight;
-        }
+            item.className =
+            "history-item";
 
-        async function loadAllChats() {
-            const historyContent = document.getElementById("historyContent");
-            try {
-                const response = await fetch('/historico/lista/sessoes');
-                const sessoes = await response.json();
 
-                if (sessoes.length === 0) {
-                    historyContent.innerHTML = "<p style='text-align:center; font-size:0.85rem; color:#80868b;'>Nenhum chat salvo.</p>";
-                    return;
-                }
+            item.innerText =
+            sessao.titulo || "Conversa sem título";
 
-                historyContent.innerHTML = "";
-                sessoes.forEach(sessao => {
-                    const item = document.createElement("div");
-                    item.classList.add("history-item");
-                    item.innerText = sessao.titulo || "Conversa sem título";
-                    item.onclick = () => loadSpecificChat(sessao._id);
-                    historyContent.appendChild(item);
-                });
-            } catch (error) {
-                console.error(error);
-            }
-        }
 
-        async function loadSpecificChat(sessionId) {
-            currentSessionId = sessionId;
-            const chatbox = document.getElementById("chatbox");
-            hideTyping(); // Garante que a animação suma ao trocar de chat
-            chatbox.innerHTML = "<p style='text-align:center;'>Carregando conversa...</p>";
-            document.getElementById("chat-status").innerText = "Visualizando histórico";
+            item.onclick =
+            ()=>loadSpecificChat(sessao._id);
 
-            try {
-                const response = await fetch(`/historico/${sessionId}`);
-                const mensagens = await response.json();
 
-                chatbox.innerHTML = "";
-                mensagens.forEach(msg => {
-                    const classe = msg.role === "user" ? "user" : "bot";
-                    const quem = msg.role === "user" ? "Você" : "Gemini";
-                    
-                    chatbox.innerHTML += `
-                        <div class="message ${classe}">
-                            <b>${quem}:</b><br>${msg.text}
-                        </div>
-                    `;
-                });
-                chatbox.scrollTop = chatbox.scrollHeight;
-            } catch (error) {
-                chatbox.innerHTML = "<p style='color:red; text-align:center;'>Erro ao carregar mensagens.</p>";
-            }
-        }
 
-        async function clearCurrentHistory() {
-            if (!confirm("Deseja apagar esta conversa específica?")) return;
-            try {
-                const response = await fetch(`/historico/${currentSessionId}`, { method: 'DELETE' });
-                if (response.ok) {
-                    startNewChat();
-                    loadAllChats();
-                }
-            } catch (error) {
-                alert("Erro ao apagar conversa.");
-            }
-        }
-    </script>
+            historyContent.appendChild(item);
+
+
+        });
+
+
+
+    }catch(error){
+
+        console.log(error);
+
+    }
+
+
+}
+
+
+
+// ==========================
+// ABRIR HISTÓRICO
+// ==========================
+
+async function loadSpecificChat(sessionId){
+
+
+    currentSessionId =
+    sessionId;
+
+
+    const chatbox =
+    document.getElementById("chatbox");
+
+
+    hideTyping();
+
+
+
+    chatbox.innerHTML =
+    "<p>Carregando conversa...</p>";
+
+
+
+    try{
+
+
+        const response =
+        await fetch(`/historico/${sessionId}`);
+
+
+
+        const mensagens =
+        await response.json();
+
+
+
+        chatbox.innerHTML="";
+
+
+
+        mensagens.forEach(msg=>{
+
+
+            const div =
+            document.createElement("div");
+
+
+            div.className =
+            msg.role==="user"
+            ? "message user"
+            : "message bot";
+
+
+
+            div.innerHTML =
+            `<b>${msg.role==="user"?"Você":"Gemini"}:</b><br>${msg.text}`;
+
+
+
+            chatbox.appendChild(div);
+
+
+
+        });
+
+
+
+    }catch(error){
+
+
+        chatbox.innerHTML =
+        "<p>Erro ao carregar mensagens.</p>";
+
+
+    }
+
+
+}
+
+
+
+// ==========================
+// APAGAR CONVERSA
+// ==========================
+
+async function clearCurrentHistory(){
+
+
+    if(!confirm(
+    "Deseja apagar esta conversa?"
+    ))
+    return;
+
+
+
+    await fetch(
+    `/historico/${currentSessionId}`,
+    {
+        method:"DELETE"
+    });
+
+
+
+    startNewChat();
+
+
+    loadAllChats();
+
+
+}
+function toggleSidebar() {
+    const sidebar = document.getElementById("sidebarMenu");
+    const overlay = document.getElementById("modalOverlay");
+    
+    sidebar.classList.toggle("active");
+    overlay.classList.toggle("active");
+}
+
+</script>
+
+
 </body>
 </html>
