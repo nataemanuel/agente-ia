@@ -3,128 +3,1008 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const path = require("path");
+const multer = require("multer");
 
 const { GoogleGenAI } = require("@google/genai");
 
 const Message = require("./models/Message");
+const User = require("./models/User");
+
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 
+
+// ==========================================
+// CONFIGURAÇÃO DO UPLOAD DE IMAGEM
+// ==========================================
+
+const upload = multer({
+
+    storage: multer.memoryStorage(),
+
+    limits: {
+        fileSize: 10 * 1024 * 1024
+    },
+
+    fileFilter: (req, file, cb) => {
+
+        if (file.mimetype.startsWith("image/")) {
+
+            cb(null, true);
+
+        } else {
+
+            cb(
+                new Error(
+                    "Apenas arquivos de imagem são permitidos."
+                )
+            );
+
+        }
+
+    }
+
+});
+
+
+// ==========================================
+// MIDDLEWARES
+// ==========================================
+
 app.use(cors());
+
 app.use(express.json());
 
-const path = require("path");
+app.use(
+    express.static(
+        path.join(__dirname, "public")
+    )
+);
 
-app.use(express.static(path.join(__dirname, "public")));
 
-mongoose.connect(process.env.MONGODB_URI)
-.then(() => console.log("MongoDB conectado"))
-.catch(err => console.log(err));
+// ==========================================
+// CONEXÃO COM MONGODB
+// ==========================================
+
+mongoose
+    .connect(process.env.MONGODB_URI)
+
+    .then(() => {
+
+        console.log("MongoDB conectado");
+
+    })
+
+    .catch(err => {
+
+        console.log(
+            "Erro MongoDB:",
+            err
+        );
+
+    });
+
+
+// ==========================================
+// GEMINI
+// ==========================================
 
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
-app.post("/chat", async (req, res) => {
 
-  try {
-
-    const { message, sessionId } = req.body;
-
-    await Message.create({
-      sessionId,
-      role: "user",
-      text: message
-    });
-
-    const history = await Message.find({ sessionId })
-      .sort({ createdAt: 1 });
-
-    const contents = history.map(msg => ({
-      role: msg.role === "user" ? "user" : "model",
-      parts: [{ text: msg.text }]
-    }));
-
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-lite-latest",
-      contents
-    });
-
-    const botReply = response.text;
-
-    await Message.create({
-      sessionId,
-      role: "assistant",
-      text: botReply
-    });
-
-    res.json({
-      reply: botReply
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      error: "Erro ao gerar resposta"
-    });
-  }
+    apiKey:
+        process.env.GEMINI_API_KEY
 
 });
-app.listen(process.env.PORT, () => {
-  console.log(`Servidor rodando na porta ${process.env.PORT}`);
-});
-// Rota para buscar o histórico de uma sessão específica
-app.get("/historico/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    
-    // Busca todas as mensagens da sessão ordenadas pela mais antiga
-    const historico = await Message.find({ sessionId }).sort({ createdAt: 1 });
-    
-    res.json(historico);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Erro ao buscar histórico" });
-  }
-});
-// Rota para apagar todo o histórico de uma sessão específica
-app.delete("/historico/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    
-    // Deleta todas as mensagens com o sessionId correspondente
-    await Message.deleteMany({ sessionId });
-    
-    res.json({ message: "Histórico apagado com sucesso!" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Erro ao apagar histórico" });
-  }
-});
-// NOVA ROTA: Lista todas as sessões únicas criadas no banco de dados
-app.get("/historico/lista/sessoes", async (req, res) => {
-  try {
-    // Usamos a agregação do MongoDB para agrupar por sessionId
-    const sessoes = await Message.aggregate([
-      {
-        $sort: { createdAt: 1 } // Garante que vamos ler a ordem certa das mensagens
-      },
-      {
-        $group: {
-          _id: "$sessionId", // Agrupa pelo ID da sessão
-          titulo: { $first: "$text" }, // Define o título como sendo o texto da PRIMEIRA mensagem enviada
-          dataCriacao: { $first: "$createdAt" }
+
+
+// ==========================================
+// MIDDLEWARE DE AUTENTICAÇÃO
+// ==========================================
+
+function autenticarToken(req, res, next) {
+
+    const authHeader =
+        req.headers.authorization;
+
+
+    if (!authHeader) {
+
+        return res.status(401).json({
+
+            error:
+                "Acesso negado. Faça login."
+
+        });
+
+    }
+
+
+    const partes =
+        authHeader.split(" ");
+
+
+    if (
+        partes.length !== 2 ||
+        partes[0] !== "Bearer"
+    ) {
+
+        return res.status(401).json({
+
+            error:
+                "Token inválido."
+
+        });
+
+    }
+
+
+    const token =
+        partes[1];
+
+
+    try {
+
+        const usuario =
+            jwt.verify(
+                token,
+                process.env.JWT_SECRET
+            );
+
+
+        req.user =
+            usuario;
+
+
+        next();
+
+
+    } catch (error) {
+
+        return res.status(401).json({
+
+            error:
+                "Token expirado ou inválido."
+
+        });
+
+    }
+
+}
+
+
+// ==========================================
+// CADASTRO
+// ==========================================
+
+app.post("/cadastro", async (req, res) => {
+
+    try {
+
+        const {
+            name,
+            email,
+            password
+        } = req.body;
+
+
+        if (
+            !name ||
+            !email ||
+            !password
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "Preencha todos os campos."
+
+            });
+
         }
-      },
-      {
-        $sort: { dataCriacao: -1 } // Mostra os chats mais recentes no topo
-      }
-    ]);
 
-    res.json(sessoes);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Erro ao listar sessões de chat" });
-  }
+
+        if (password.length < 6) {
+
+            return res.status(400).json({
+
+                error:
+                    "A senha deve ter pelo menos 6 caracteres."
+
+            });
+
+        }
+
+
+        const emailNormalizado =
+            email
+                .trim()
+                .toLowerCase();
+
+
+        const usuarioExistente =
+            await User.findOne({
+
+                email:
+                    emailNormalizado
+
+            });
+
+
+        if (usuarioExistente) {
+
+            return res.status(400).json({
+
+                error:
+                    "Este e-mail já está cadastrado."
+
+            });
+
+        }
+
+
+        const senhaCriptografada =
+            await bcrypt.hash(
+                password,
+                10
+            );
+
+
+        const usuario =
+            await User.create({
+
+                name:
+                    name.trim(),
+
+                email:
+                    emailNormalizado,
+
+                password:
+                    senhaCriptografada
+
+            });
+
+
+        res.status(201).json({
+
+            message:
+                "Usuário criado com sucesso!",
+
+            user: {
+
+                id:
+                    usuario._id,
+
+                name:
+                    usuario.name,
+
+                email:
+                    usuario.email
+
+            }
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Erro no cadastro:",
+            error
+        );
+
+
+        res.status(500).json({
+
+            error:
+                "Erro ao criar usuário."
+
+        });
+
+    }
+
 });
+
+
+// ==========================================
+// LOGIN
+// ==========================================
+
+app.post("/login", async (req, res) => {
+
+    try {
+
+        const {
+            email,
+            password
+        } = req.body;
+
+
+        if (
+            !email ||
+            !password
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "Informe e-mail e senha."
+
+            });
+
+        }
+
+
+        const emailNormalizado =
+            email
+                .trim()
+                .toLowerCase();
+
+
+        const usuario =
+            await User.findOne({
+
+                email:
+                    emailNormalizado
+
+            });
+
+
+        if (!usuario) {
+
+            return res.status(401).json({
+
+                error:
+                    "E-mail ou senha incorretos."
+
+            });
+
+        }
+
+
+        const senhaCorreta =
+            await bcrypt.compare(
+                password,
+                usuario.password
+            );
+
+
+        if (!senhaCorreta) {
+
+            return res.status(401).json({
+
+                error:
+                    "E-mail ou senha incorretos."
+
+            });
+
+        }
+
+
+        const token =
+            jwt.sign(
+
+                {
+
+                    id:
+                        usuario._id.toString(),
+
+                    email:
+                        usuario.email
+
+                },
+
+                process.env.JWT_SECRET,
+
+                {
+
+                    expiresIn:
+                        "7d"
+
+                }
+
+            );
+
+
+        res.json({
+
+            message:
+                "Login realizado com sucesso!",
+
+            token,
+
+            user: {
+
+                id:
+                    usuario._id,
+
+                name:
+                    usuario.name,
+
+                email:
+                    usuario.email
+
+            }
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Erro no login:",
+            error
+        );
+
+
+        res.status(500).json({
+
+            error:
+                "Erro ao realizar login."
+
+        });
+
+    }
+
+});
+
+
+// ==========================================
+// CHAT
+// ==========================================
+
+app.post(
+
+    "/chat",
+
+    autenticarToken,
+
+    upload.single("image"),
+
+    async (req, res) => {
+
+        try {
+
+            const message =
+                (req.body.message || "")
+                    .trim();
+
+
+            const sessionId =
+                (req.body.sessionId || "")
+                    .trim();
+
+
+            const image =
+                req.file;
+
+
+            // ==================================
+            // VALIDAR
+            // ==================================
+
+            if (
+                !sessionId ||
+                (!message && !image)
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Envie uma mensagem ou uma imagem."
+
+                });
+
+            }
+
+
+            const userId =
+                req.user.id;
+
+
+            // ==================================
+            // SALVAR MENSAGEM DO USUÁRIO
+            // ==================================
+
+            await Message.create({
+
+                userId,
+
+                sessionId,
+
+                role: "user",
+
+                text: message,
+
+                image: image
+                    ? {
+                        data: image.buffer.toString("base64"),
+                        mimeType: image.mimetype
+                    }
+                    : {
+                        data: null,
+                        mimeType: null
+                    }
+
+            });
+
+
+            // ==================================
+            // BUSCAR HISTÓRICO
+            // ==================================
+
+            const history =
+                await Message.find({
+
+                    userId,
+
+                    sessionId
+
+                }).sort({
+
+                    createdAt:
+                        1
+
+                });
+
+
+            // ==================================
+            // TRANSFORMAR HISTÓRICO
+            // ==================================
+
+            const contents =
+                history.map(msg => {
+
+                    const parts = [];
+
+
+                    // Texto da mensagem
+                    if (msg.text) {
+
+                        parts.push({
+
+                            text: msg.text
+
+                        });
+
+                    }
+
+
+                    // Imagem da mensagem
+                    if (
+                        msg.image &&
+                        msg.image.data
+                    ) {
+
+                        parts.push({
+
+                            inlineData: {
+
+                                mimeType:
+                                    msg.image.mimeType,
+
+                                data:
+                                    msg.image.data
+
+                            }
+
+                        });
+
+                    }
+
+
+                    return {
+
+                        role:
+                            msg.role === "user"
+                                ? "user"
+                                : "model",
+
+                        parts
+
+                    };
+
+                });
+
+
+            // ==================================
+            // GEMINI
+            // ==================================
+
+            const response =
+                await ai.models.generateContent({
+
+                    model:
+                        "gemini-2.5-flash",
+
+                    contents
+
+                });
+
+
+            const botReply =
+                response.text;
+
+
+            // ==================================
+            // SALVAR RESPOSTA DO BOT
+            // ==================================
+
+            await Message.create({
+
+                userId,
+
+                sessionId,
+
+                role:
+                    "assistant",
+
+                text:
+                    botReply
+
+            });
+
+
+            // ==================================
+            // RESPONDER AO FRONTEND
+            // ==================================
+
+            res.json({
+
+                reply:
+                    botReply
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Erro no chat:",
+                error
+            );
+
+
+            res.status(500).json({
+
+                error:
+                    error.message ||
+                    "Erro ao gerar resposta."
+
+            });
+
+        }
+
+    }
+
+);
+
+
+// ==========================================
+// ERROS DO UPLOAD
+// ==========================================
+
+app.use(
+    (error, req, res, next) => {
+
+        if (
+            error instanceof multer.MulterError
+        ) {
+
+            if (
+                error.code ===
+                "LIMIT_FILE_SIZE"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "A imagem deve ter no máximo 10 MB."
+
+                });
+
+            }
+
+
+            return res.status(400).json({
+
+                error:
+                    "Erro ao enviar a imagem."
+
+            });
+
+        }
+
+
+        if (
+            error &&
+            error.message ===
+            "Apenas arquivos de imagem são permitidos."
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    error.message
+
+            });
+
+        }
+
+
+        next(error);
+
+    }
+);
+
+
+// ==========================================
+// HISTÓRICO DE UMA CONVERSA
+// ==========================================
+
+app.get(
+
+    "/historico/:sessionId",
+
+    autenticarToken,
+
+    async (req, res) => {
+
+        try {
+
+            const {
+                sessionId
+            } = req.params;
+
+
+            const userId =
+                req.user.id;
+
+
+            const historico =
+                await Message.find({
+
+                    userId,
+
+                    sessionId
+
+                }).sort({
+
+                    createdAt:
+                        1
+
+                });
+
+
+            // Formatação explícita para garantir o envio correto dos dados da imagem
+            const mensagensFormatadas = historico.map(msg => ({
+                _id: msg._id,
+                userId: msg.userId,
+                sessionId: msg.sessionId,
+                role: msg.role,
+                text: msg.text,
+                image: (msg.image && msg.image.data) ? {
+                    data: msg.image.data,
+                    mimeType: msg.image.mimeType
+                } : null,
+                createdAt: msg.createdAt
+            }));
+
+
+            res.json(
+                mensagensFormatadas
+            );
+
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+
+            res.status(500).json({
+
+                error:
+                    "Erro ao buscar histórico."
+
+            });
+
+        }
+
+    }
+
+);
+
+
+// ==========================================
+// APAGAR CONVERSA
+// ==========================================
+
+app.delete(
+
+    "/historico/:sessionId",
+
+    autenticarToken,
+
+    async (req, res) => {
+
+        try {
+
+            const {
+                sessionId
+            } = req.params;
+
+
+            const userId =
+                req.user.id;
+
+
+            await Message.deleteMany({
+
+                userId,
+
+                sessionId
+
+            });
+
+
+            res.json({
+
+                message:
+                    "Histórico apagado com sucesso!"
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+
+            res.status(500).json({
+
+                error:
+                    "Erro ao apagar histórico."
+
+            });
+
+        }
+
+    }
+
+);
+
+
+// ==========================================
+// LISTAR CONVERSAS DO USUÁRIO
+// ==========================================
+
+app.get(
+
+    "/historico/lista/sessoes",
+
+    autenticarToken,
+
+    async (req, res) => {
+
+        try {
+
+            const userId =
+                req.user.id;
+
+
+            const sessoes =
+                await Message.aggregate([
+
+                    {
+
+                        $match: {
+
+                            userId:
+                                new mongoose.Types.ObjectId(
+                                    userId
+                                )
+
+                        }
+
+                    },
+
+                    {
+
+                        $sort: {
+
+                            createdAt:
+                                1
+
+                        }
+
+                    },
+
+                    {
+
+                        $group: {
+
+                            _id:
+                                "$sessionId",
+
+                            titulo: {
+
+                                $first:
+                                    "$text"
+
+                            },
+
+                            dataCriacao: {
+
+                                $first:
+                                    "$createdAt"
+
+                            }
+
+                        }
+
+                    },
+
+                    {
+
+                        $sort: {
+
+                            dataCriacao:
+                                -1
+
+                        }
+
+                    }
+
+                ]);
+
+
+            res.json(
+                sessoes
+            );
+
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+
+            res.status(500).json({
+
+                error:
+                    "Erro ao listar sessões de chat."
+
+            });
+
+        }
+
+    }
+
+);
+
+
+// ==========================================
+// SERVIDOR
+// ==========================================
+
+const PORT =
+    process.env.PORT || 3000;
+
+
+app.listen(
+    PORT,
+    () => {
+
+        console.log(
+            `Servidor rodando na porta ${PORT}`
+        );
+
+    }
+);
